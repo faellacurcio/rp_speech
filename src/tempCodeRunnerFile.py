@@ -1,1 +1,2 @@
-python3
+
+            print("---------"+str(time_counter)+" s")
