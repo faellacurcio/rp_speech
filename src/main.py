@@ -3,6 +3,7 @@ from python_speech_features import logfbank
 import scipy.io.wavfile as wav
 from record import RECORD
 from time import sleep
+import pickle
 import glob
 import os
 
@@ -17,6 +18,20 @@ from sklearn.ensemble import RandomForestClassifier, AdaBoostClassifier
 
 import pyaudio  
 import wave 
+import time
+
+# COnvert one file
+# sox example.flac -r 44100 -c 1 example3.wav
+
+# COnvert batch
+# for old in *.flac; do sox $old -r 44100 -c 1 `basename $old .flac`.wav; done
+
+# Concatenate Batch
+# https://trac.ffmpeg.org/wiki/Concatenate
+# ffmpeg -f concat -safe 0 -i <(find . -name '*.wav' -printf "file '$PWD/%p'\n") -c copy output.wav
+
+# Split audio
+# ffmpeg -i Person1_COMPLETE.wav -f segment -segment_time 10 -c copy out%03d.wav
 
 # database https://github.com/Jakobovski/free-spoken-digit-dataset/tree/master/recordings
 
@@ -77,7 +92,10 @@ def play_wav(path):
 def play_classify(path, clf):
     #define stream chunk   
     CHUNK = 1024  
+    time_counter = 1
     person_guess = []
+    result = []
+
     #open a wav format music  
     print("Opening file:")
     print("./"+path+".wav")
@@ -96,7 +114,6 @@ def play_classify(path, clf):
     data = f.readframes(CHUNK)  
 
     mfcc_sig_splits = chunks(sig,CHUNK)
-    time_counter = 2
     #play stream  
     while data:
         # sox example.flac -r 44100 -c 1 example3.wav
@@ -107,20 +124,59 @@ def play_classify(path, clf):
         person_guess.append(clf.predict(aux2))
         stream.write(data)
         data = f.readframes(CHUNK)  
-        if(len(person_guess) == 86):
-            if(person_guess.count(1) > person_guess.count(0)):
+        if(len(person_guess) == 43):# every 43 blocks is 1 second for 44100Hz rate
+            boolean_check = np.argmax([person_guess.count(0), person_guess.count(1)])
+            if(boolean_check):
                 print("person0")
             else:
                 print("person1")
             print("---------"+str(time_counter)+" s")
-            time_counter+=2 
+            time_counter+=1
             person_guess = []
+            result.append(0 if boolean_check else 1)
     #stop stream  
     stream.stop_stream()  
     stream.close()  
 
     #close PyAudio  
     p.terminate() 
+    return result
+
+def classify(path, clf):
+    #define stream chunk   
+    CHUNK = 1024
+    time_counter = 1
+    person_guess = []
+    result = []
+
+    #open a wav format music  
+    print("Opening file:")
+    print("./"+path+".wav")
+    f = wave.open("./"+path+".wav","rb")
+    #open a wav format mfcc
+    (rate,sig) = wav.read("./"+path+".wav")
+
+    mfcc_sig_splits = chunks(sig,CHUNK)
+ 
+    try:
+        while True:
+            aux = next(mfcc_sig_splits)
+            aux2 = mfcc(aux,samplerate = rate, nfft=1104)
+            person_guess.append(clf.predict(aux2))
+            if(len(person_guess) == 43):# every 43 blocks is 1 second for 44100Hz rate
+                boolean_check = np.argmax([person_guess.count(0), person_guess.count(1)])
+                # if(boolean_check):
+                #     print("person0")
+                # else:
+                #     print("person1")
+                # print("---------"+str(time_counter)+" s")
+                time_counter+=1
+                person_guess = []
+                result.append(0 if boolean_check else 1)
+    except:
+        pass
+
+    return result
 
 
 def get_training_data(path):
@@ -162,14 +218,12 @@ obj_record = RECORD(THRESHOLD = 10000)
 
 # =======================================================
 
-
+# Train Person 0
 print("Getting data from person 1")
-# Train Person 1
-
-Person0_data = get_training_data("rp_speech/src/Train0")
+Person0_data = get_training_data("rp_speech/src/Train2")
 #print(Person0_data)
 
-# Train Person 2
+# Train Person 1
 print("Getting data from person 2")
 Person1_data = get_training_data("rp_speech/src/Train1")
 #print(Person1_data)
@@ -178,31 +232,73 @@ Person1_data = get_training_data("rp_speech/src/Train1")
 
 X = np.concatenate((Person0_data,Person1_data),axis=0)
 y = np.concatenate((np.ones([1,len(Person0_data)]),np.zeros([1,len(Person1_data)])), axis=1)
-
+print("")
+# ---------------------------------------- MLP -----------------------------------------
+start = time.time()
+print("Fit MLP")
 clf = MLPClassifier(solver='lbfgs', alpha=1e-5, hidden_layer_sizes=(50,3), random_state=1)
 clf.fit(X, np.ravel(y))
-
-play_classify("rp_speech/src/Test/both", clf)
-
+print("classify MLP")
+MLP_result = play_classify("rp_speech/src/Test/10SecsInterval2", clf)
+end = time.time()
+print([(end - start)/60, " minutes"])
+print("")
+# ---------------------------------------- SVC -----------------------------------------
+start = time.time()
+print("Fit SVC")
 clf = svm.SVC(gamma='scale')
-clf.fit(X, y)
-
-play_classify("rp_speech/src/Test/both", clf)
-
+clf.fit(X, np.ravel(y))
+print("classify SVC")
+SVC_result = classify("rp_speech/src/Test/10SecsInterval2", clf)
+end = time.time()
+print([(end - start)/60, " minutes"])
+print("")
+# ---------------------------------------- QDA -----------------------------------------
+start = time.time()
+print("Fit QDA")
 clf = QuadraticDiscriminantAnalysis()
-clf.fit(X, y)
-
-play_classify("rp_speech/src/Test/both", clf)
-
-clf = SVC(gamma='auto')
-clf.fit(X, y)
-
-play_classify("rp_speech/src/Test/both", clf)
-
+clf.fit(X, np.ravel(y))
+print("classify QDA")
+QDA_result = classify("rp_speech/src/Test/10SecsInterval2", clf)
+end = time.time()
+print([(end - start)/60, " minutes"])
+print("")
+# ---------------------------------------- SVM -----------------------------------------
+# start = time.time()
+# print("Fit SVM")
+# clf = SVC(gamma='auto')
+# clf.fit(X, np.ravel(y))
+# print("classify SVM")
+# SVM_result = classify("rp_speech/src/Test/10SecsInterval2", clf)
+# end = time.time()
+# print([(end - start)/60, " minutes"])
+# print("")
+# ---------------------------------------- Random Florest -----------------------------------------
+start = time.time()
+print("Fit Random Florest")
 clf = RandomForestClassifier(n_estimators=100, max_depth=2,random_state=0)
-clf.fit(X, y)
+clf.fit(X, np.ravel(y))
+print("classify Random Florest")
+RFC_result = classify("rp_speech/src/Test/10SecsInterval2", clf)
+end = time.time()
+print([(end - start)/60, " minutes"])
+print("")
+# ---------------------------------------- Expected Answer -----------------------------------------
+aux = np.concatenate(( 10*[0], 10*[1]), axis=0)
+aux2 = list(np.tile(aux, (1, 24)))
+expected_output =  np.concatenate(( aux2[0],2*[1]), axis=0)
 
-play_classify("rp_speech/src/Test/both", clf)
+print("expected_output", expected_output)
+print("MLP_result", MLP_result)
+print("SVC_result", SVC_result)
+print("QDA_result", QDA_result)
+# print("SVM_result", SVM_result)
+print("RFC_result", RFC_result)
+
+# Saving the objects:
+with open('objs.pkl', 'wb') as f:
+    pickle.dump([expected_output, MLP_result,SVC_result,QDA_result,RFC_result], f)
+    #pickle.dump([expected_output, MLP_result], f)
 
 
 quit()
