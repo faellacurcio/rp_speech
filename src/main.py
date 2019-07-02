@@ -1,8 +1,8 @@
 from python_speech_features import mfcc
 from python_speech_features import logfbank
 import scipy.io.wavfile as wav
-from record import RECORD
 from time import sleep
+import random
 import pickle
 import glob
 import os
@@ -35,6 +35,21 @@ import time
 
 # database https://github.com/Jakobovski/free-spoken-digit-dataset/tree/master/recordings
 
+AUDIO_PATH = "./src/audio_samples/**/"
+
+def get_folders():
+    folders = []
+    for it_folder in glob.glob(AUDIO_PATH):
+        # print(it_folder.split("/")[3])
+        # print(it_folder)
+        folders.append(it_folder)
+    return folders
+
+def get_subfolders(path):
+    subfolders = []
+    for it_subfolder in glob.glob(path+"*"):
+        subfolders.append(it_subfolder)
+    return subfolders
 
 def bip():
     "Beeps for indicate code progress"
@@ -178,8 +193,7 @@ def classify(path, clf):
 
     return result
 
-
-def get_training_data(path):
+def get_training_from_folder(path):
     """
     input:
         path = string com o nome da pasta de treinamento
@@ -214,24 +228,69 @@ def get_training_data(path):
     
     return person_data
 
-obj_record = RECORD(THRESHOLD = 10000)
+def get_training_from_file(path):
+    """
+    input:
+        path = string com o nome do arquivo de treinamento
+    output: 
+        vetor com os valores de MFCC para todos os audios dentro da pasta
+    """
+    # Variavel que armazena os dados da primeira pessoa
+    person_data = []
+
+    # Para cada arquivo na pasta de treino da pessoa 1 coleta os valores de MFCC
+    print("Searching file: "+"./"+str(path))
+    # Tamanho do bloco
+    CHUNK = 1024
+
+    # Abre o arquivo
+    (rate,sig) = wav.read(path)
+
+    #Separa os dados em blocos de tamanho CHUNK
+    mfcc_sig_splits = chunks(sig,CHUNK)
+    # d_mfcc_feat = delta(mfcc_feat, 2)
+
+    # Enquanto houver dados, append na variavel de dados
+    while True:
+        try:
+            aux = next(mfcc_sig_splits)
+            mfcc_values = mfcc(aux,samplerate = rate, nfft=1104)
+            person_data.append(list(mfcc_values[0]))
+        except:
+            break
+
+    return person_data
+
 
 # =======================================================
 
 # Train Person 0
 print("Getting data from person 1")
-Person0_data = get_training_data("rp_speech/src/Train2")
+Person0_data = get_training_from_folder("rp_speech/src/Train2")
 #print(Person0_data)
 
 # Train Person 1
 print("Getting data from person 2")
-Person1_data = get_training_data("rp_speech/src/Train1")
+Person1_data = get_training_from_folder("rp_speech/src/Train1")
 #print(Person1_data)
 
 
+X = np.array([])
+Y = np.array([])
+y_counter = 0;
+for person in get_folders():
+    subfolder = random.choice(get_subfolders(person))
+    training_audio = random.choice(get_subfolders(subfolder))
 
-X = np.concatenate((Person0_data,Person1_data),axis=0)
-y = np.concatenate((np.ones([1,len(Person0_data)]),np.zeros([1,len(Person1_data)])), axis=1)
+    X = np.concatenate((X,get_training_from_file(training_audio)),axis=0)
+    y = np.concatenate((y, counter*np.ones([1,len(training_audio)]))), axis=1)
+    counter+=1
+
+    
+
+#for folder in glob.glob("./src/audio_samples/**/"):
+
+quit()
 print("")
 # ---------------------------------------- MLP -----------------------------------------
 start = time.time()
@@ -263,16 +322,6 @@ QDA_result = classify("rp_speech/src/Test/10SecsInterval2", clf)
 end = time.time()
 print([(end - start)/60, " minutes"])
 print("")
-# ---------------------------------------- SVM -----------------------------------------
-# start = time.time()
-# print("Fit SVM")
-# clf = SVC(gamma='auto')
-# clf.fit(X, np.ravel(y))
-# print("classify SVM")
-# SVM_result = classify("rp_speech/src/Test/10SecsInterval2", clf)
-# end = time.time()
-# print([(end - start)/60, " minutes"])
-# print("")
 # ---------------------------------------- Random Florest -----------------------------------------
 start = time.time()
 print("Fit Random Florest")
@@ -300,32 +349,3 @@ with open('objs.pkl', 'wb') as f:
     pickle.dump([expected_output, MLP_result,SVC_result,QDA_result,RFC_result], f)
     #pickle.dump([expected_output, MLP_result], f)
 
-
-quit()
-
-# print("Pessoa 1 fala")
-# sleep(1)
-# bip()
-# /home/rafael/Desktop/RP_speech/audio_samples/174/84280/174-84280-0001.flac
-# personfile1 = "person1"
-
-# dr1, data1 = obj_record.record_to_raw_audio(personfile1)
-# obj_record.saveToFile(personfile1)
-# play_wav(personfile1)
-# bip()
-# bip()
-
-# print("Pessoa 2 fala")
-# sleep(1)
-# bip()
-# # /home/rafael/Desktop/RP_speech/audio_samples/84/121123/84-121123-0005.flac
-# personfile2 = "person2"
-# # dr2, data2 = obj_record.record_to_raw_audio(personfile2)
-# obj_record.saveToFile(personfile2)
-# bip()
-
-(rate,sig) = wav.read(personfile1+".wav")
-mfcc_feat = mfcc(sig,rate)
-# fbank_feat = logfbank(sig,rate)
-
-print(mfcc_feat.shape)
